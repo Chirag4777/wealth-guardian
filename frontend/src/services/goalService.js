@@ -1,6 +1,7 @@
-import axios from 'axios';
+import api from '../services/api';
 
-const API_URL = '/api/goals';
+// Use just the endpoint without 'api' since the base URL already includes it
+const API_URL = '/goals';
 
 /**
  * Service to handle goal operations
@@ -13,7 +14,7 @@ const goalService = {
   getGoals: async () => {
     try {
       console.log(`Fetching goals from ${API_URL}`);
-      const response = await axios.get(API_URL);
+      const response = await api.get(API_URL);
       console.log('Goals API response:', response);
       return response.data;
     } catch (error) {
@@ -30,7 +31,7 @@ const goalService = {
    */
   getGoalById: async (id) => {
     try {
-      const response = await axios.get(`${API_URL}/${id}`);
+      const response = await api.get(`${API_URL}/${id}`);
       return response.data;
     } catch (error) {
       console.error('Error fetching goal:', error);
@@ -48,7 +49,20 @@ const goalService = {
       console.log(`Creating goal with data:`, goalData);
       console.log(`Sending POST request to ${API_URL}`);
       
-      const response = await axios.post(API_URL, goalData);
+      // Ensure all required fields are present and properly formatted
+      const validatedData = {
+        name: goalData.name,
+        targetAmount: Number(goalData.targetAmount),
+        currentAmount: Number(goalData.currentAmount || 0),
+        startDate: goalData.startDate || new Date().toISOString(),
+        targetDate: goalData.targetDate,
+        category: goalData.category || 'savings',
+        description: goalData.description || ''
+      };
+      
+      console.log('Validated data:', validatedData);
+      
+      const response = await api.post(API_URL, validatedData);
       console.log('Create goal response:', response);
       return response.data;
     } catch (error) {
@@ -56,16 +70,27 @@ const goalService = {
       console.error('Error response:', error.response);
       console.error('Error details:', error.response?.data || 'No detailed error');
       
-      // Throw a more descriptive error
+      // More descriptive errors based on status codes
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
-        throw new Error(`Server error: ${error.response.status} - ${error.response.data?.message || error.message}`);
+        const status = error.response.status;
+        const errorMsg = error.response.data?.message || error.message;
+        
+        if (status === 400) {
+          throw new Error(`Validation error: ${errorMsg}`);
+        } else if (status === 401) {
+          throw new Error('Authentication required. Please login again.');
+        } else if (status === 403) {
+          throw new Error('You do not have permission to create goals.');
+        } else if (status === 404) {
+          throw new Error('API endpoint not found. Service may be unavailable.');
+        } else if (status === 500) {
+          throw new Error('Server error. Please try again later.');
+        } else {
+          throw new Error(`Server error: ${status} - ${errorMsg}`);
+        }
       } else if (error.request) {
-        // The request was made but no response was received
         throw new Error('No response from server. Please check your network connection.');
       } else {
-        // Something happened in setting up the request that triggered an Error
         throw new Error(`Request error: ${error.message}`);
       }
     }
@@ -80,7 +105,7 @@ const goalService = {
   updateGoal: async (id, goalData) => {
     try {
       console.log(`Updating goal ${id} with data:`, goalData);
-      const response = await axios.put(`${API_URL}/${id}`, goalData);
+      const response = await api.put(`${API_URL}/${id}`, goalData);
       console.log('Update response:', response);
       return response.data;
     } catch (error) {
@@ -97,7 +122,7 @@ const goalService = {
    */
   deleteGoal: async (id) => {
     try {
-      await axios.delete(`${API_URL}/${id}`);
+      await api.delete(`${API_URL}/${id}`);
     } catch (error) {
       console.error('Error deleting goal:', error);
       throw error;
@@ -112,7 +137,7 @@ const goalService = {
    */
   contributeToGoal: async (id, amount) => {
     try {
-      const response = await axios.put(`${API_URL}/${id}/contribute`, { amount });
+      const response = await api.put(`${API_URL}/${id}/contribute`, { amount });
       return response.data;
     } catch (error) {
       console.error('Error contributing to goal:', error);
@@ -126,7 +151,7 @@ const goalService = {
    */
   getGoalsSummary: async () => {
     try {
-      const response = await axios.get(`${API_URL}/summary`);
+      const response = await api.get(`${API_URL}/summary`);
       return response.data;
     } catch (error) {
       console.error('Error fetching goals summary:', error);

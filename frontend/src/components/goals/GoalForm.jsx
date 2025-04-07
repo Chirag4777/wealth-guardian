@@ -32,37 +32,54 @@ const GoalForm = () => {
     setError(null);
 
     try {
-      // Format dates to ISO string and convert amounts to numbers
+      // Validate required fields first
+      if (!formData.name || !formData.targetAmount || !formData.targetDate) {
+        throw new Error('Please fill in all required fields');
+      }
+
+      const targetAmount = parseFloat(formData.targetAmount);
+      const currentAmount = parseFloat(formData.currentAmount) || 0;
+
+      // Validate amounts
+      if (isNaN(targetAmount) || targetAmount <= 0) {
+        throw new Error('Target amount must be greater than 0');
+      }
+
+      if (isNaN(currentAmount) || currentAmount < 0) {
+        throw new Error('Current amount cannot be negative');
+      }
+
+      if (currentAmount > targetAmount) {
+        throw new Error('Current amount cannot be greater than target amount');
+      }
+
+      // Format dates to ISO string and prepare data
+      const today = new Date();
+      
+      // Validate target date
+      const targetDate = new Date(formData.targetDate);
+      if (isNaN(targetDate.getTime())) {
+        throw new Error('Please enter a valid target date');
+      }
+      
+      if (targetDate < today) {
+        throw new Error('Target date must be in the future');
+      }
+
+      // Prepare the final data object for submission
       const goalData = {
-        name: formData.name,
-        targetAmount: parseFloat(formData.targetAmount),
-        currentAmount: parseFloat(formData.currentAmount) || 0,
-        startDate: new Date().toISOString(),
-        targetDate: formData.targetDate ? new Date(formData.targetDate).toISOString() : null,
+        name: formData.name.trim(),
+        targetAmount: targetAmount,
+        currentAmount: currentAmount,
+        startDate: today.toISOString(),
+        targetDate: targetDate.toISOString(),
         category: formData.category,
-        description: formData.description || ""
+        description: formData.description?.trim() || ""
       };
 
       console.log('Submitting goal data:', goalData);
 
-      // Validate required fields
-      if (!goalData.name || !goalData.targetAmount || !goalData.targetDate) {
-        throw new Error('Please fill in all required fields');
-      }
-
-      // Validate amounts
-      if (goalData.targetAmount <= 0) {
-        throw new Error('Target amount must be greater than 0');
-      }
-
-      if (goalData.currentAmount < 0) {
-        throw new Error('Current amount cannot be negative');
-      }
-
-      if (goalData.currentAmount > goalData.targetAmount) {
-        throw new Error('Current amount cannot be greater than target amount');
-      }
-
+      // Submit to the backend
       const response = await goalService.createGoal(goalData);
       console.log('Goal created successfully:', response);
       navigate('/goals');
