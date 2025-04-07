@@ -1,0 +1,177 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String           @id @default(uuid())
+  email          String           @unique
+  password       String
+  name           String?
+  phone          String?
+  address        String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  accounts       Account[]
+  transactions   Transaction[]
+  budgets        Budget[]
+  goals          Goal[]
+  resetToken     String?
+  resetTokenExp  DateTime?
+  wallet         Wallet?
+  sentTransfers     WalletTransaction[] @relation("SenderTransactions")
+  receivedTransfers WalletTransaction[] @relation("ReceiverTransactions")
+}
+
+model Account {
+  id            String         @id @default(uuid())
+  name          String
+  type          AccountType    @default(CHECKING)
+  balance       Float          @default(0)
+  currency      String         @default("USD")
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  Transaction[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+}
+
+model Transaction {
+  id          String            @id @default(uuid())
+  amount      Float
+  description String
+  date        DateTime          @default(now())
+  category    String?
+  type        TransactionType
+  userId      String
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accountId   String
+  account     Account           @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+}
+
+model Budget {
+  id          String       @id @default(uuid())
+  name        String
+  amount      Float
+  category    String
+  period      BudgetPeriod @default(MONTHLY)
+  startDate   DateTime
+  endDate     DateTime?
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Goal {
+  id          String       @id @default(uuid())
+  name        String
+  targetAmount Float
+  currentAmount Float      @default(0)
+  startDate   DateTime     @default(now())
+  targetDate  DateTime
+  category    String?
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Wallet {
+  id                String              @id @default(uuid())
+  balance           Float               @default(1000)
+  userId            String              @unique
+  user              User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+  walletTransactions WalletTransaction[]
+  razorpayPayments  RazorpayPayment[]
+}
+
+model WalletTransaction {
+  id              String            @id @default(uuid())
+  amount          Float
+  type            WalletTransactionType
+  description     String
+  status          TransactionStatus @default(COMPLETED)
+  senderId        String?
+  sender          User?             @relation("SenderTransactions", fields: [senderId], references: [id])
+  receiverId      String?
+  receiver        User?             @relation("ReceiverTransactions", fields: [receiverId], references: [id])
+  walletId        String
+  wallet          Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  razorpayPaymentId String?         @unique
+  razorpayPayment RazorpayPayment?  @relation(fields: [razorpayPaymentId], references: [id])
+}
+
+model RazorpayPayment {
+  id                String            @id
+  orderId           String            @unique
+  amount            Float
+  currency          String            @default("INR")
+  status            PaymentStatus     @default(CREATED)
+  walletId          String
+  wallet            Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  walletTransaction WalletTransaction?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+}
+
+enum AccountType {
+  CHECKING
+  SAVINGS
+  CREDIT_CARD
+  INVESTMENT
+  CASH
+  OTHER
+}
+
+enum TransactionType {
+  INCOME
+  EXPENSE
+  TRANSFER
+}
+
+enum BudgetPeriod {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+enum WalletTransactionType {
+  DEPOSIT
+  WITHDRAWAL
+  TRANSFER_IN
+  TRANSFER_OUT
+}
+
+enum TransactionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  REFUNDED
+  FAILED
+}

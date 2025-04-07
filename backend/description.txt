@@ -1,0 +1,462 @@
+# Wealth Guardian Frontend Implementation Guide
+
+## Technology Stack
+- **Framework**: React.js with Next.js for server-side rendering and routing
+- **UI Library**: Material-UI (MUI) or Chakra UI for polished, responsive components
+- **State Management**: Redux Toolkit for global state, React Query for server state
+- **Form Handling**: React Hook Form with Zod for validation (matches backend)
+- **API Integration**: Axios for API requests
+- **Authentication**: JWT with HTTP-only cookies (matching backend implementation)
+- **Charts/Visualization**: Recharts or Chart.js for financial data visualization
+- **Payment Integration**: Razorpay JavaScript SDK
+
+## Project Structure
+```
+wealth-guardian-frontend/
+├── public/
+│   ├── favicon.ico
+│   ├── images/
+│   └── ...
+├── src/
+│   ├── components/
+│   │   ├── ui/
+│   │   │   ├── Button.jsx
+│   │   │   ├── Card.jsx
+│   │   │   ├── Input.jsx
+│   │   │   └── ...
+│   │   ├── layout/
+│   │   │   ├── Header.jsx
+│   │   │   ├── Sidebar.jsx
+│   │   │   ├── MainLayout.jsx
+│   │   │   └── ...
+│   │   ├── auth/
+│   │   │   ├── LoginForm.jsx
+│   │   │   ├── RegisterForm.jsx
+│   │   │   └── ...
+│   │   ├── accounts/
+│   │   │   ├── AccountCard.jsx
+│   │   │   ├── AccountForm.jsx
+│   │   │   ├── AccountList.jsx
+│   │   │   └── ...
+│   │   ├── transactions/
+│   │   ├── budgets/
+│   │   ├── goals/
+│   │   └── wallet/
+│   │       ├── WalletCard.jsx
+│   │       ├── TransactionList.jsx
+│   │       ├── TransferForm.jsx
+│   │       ├── AddFundsForm.jsx
+│   │       └── ...
+│   ├── pages/
+│   │   ├── index.js
+│   │   ├── auth/
+│   │   │   ├── login.js
+│   │   │   ├── register.js
+│   │   │   └── ...
+│   │   ├── dashboard.js
+│   │   ├── accounts/
+│   │   ├── transactions/
+│   │   ├── budgets/
+│   │   ├── goals/
+│   │   └── wallet/
+│   │       ├── index.js
+│   │       ├── transactions.js
+│   │       └── ...
+│   ├── features/
+│   │   ├── auth/
+│   │   ├── accounts/
+│   │   ├── transactions/
+│   │   ├── budgets/
+│   │   ├── goals/
+│   │   └── wallet/
+│   ├── hooks/
+│   │   ├── useAuth.js
+│   │   ├── useAccounts.js
+│   │   └── ...
+│   ├── utils/
+│   │   ├── api.js
+│   │   ├── formatters.js
+│   │   └── validators.js
+│   ├── constants/
+│   │   ├── routes.js
+│   │   ├── apiEndpoints.js
+│   │   └── ...
+│   └── store/
+│       ├── index.js
+│       └── slices/
+├── styles/
+│   ├── globals.css
+│   └── ...
+├── .env.local
+├── .env.example
+└── ...
+```
+
+## Key Pages
+
+### Authentication
+- **Login Page**: Email/password login with "Remember me" option
+- **Register Page**: User registration with form validation matching backend
+- **Forgot Password**: Password recovery flow
+
+### Dashboard
+- Overview of all financial data with key metrics
+- Quick access to accounts, recent transactions, budget status, goals progress
+- Wallet balance with quick actions (transfer, deposit)
+- Financial insights and spending analysis charts
+
+### Accounts
+- Accounts listing with balances, types, and quick actions
+- Account details page with transaction history
+- Add/Edit account forms with validation
+
+### Transactions
+- Transaction listing with filtering and search
+- Transaction details modal/page
+- Add/Edit transaction forms with category selection
+- Transaction analytics (spending by category, time-based trends)
+
+### Budgets
+- Budget listing with progress indicators
+- Budget details with spending breakdown by category
+- Add/Edit budget forms with period selection
+- Budget vs. actual spending charts
+
+### Goals
+- Financial goals listing with progress bars
+- Goal details page with contribution history
+- Add/Edit goal forms with target date and amount
+- Goal tracking and projection charts
+
+### Wallet
+- Wallet dashboard with balance and recent transactions
+- Transaction history with filters
+- Money transfer form with user search
+- Add funds flow with Razorpay integration
+- Receipt/confirmation for completed transactions
+
+## UI/UX Design Guidelines
+
+### Theme
+- **Color Scheme**: Primary color (#1976D2 - blue), Secondary color (#388E3C - green), with accent colors for different financial categories
+- **Typography**: Clean, readable font like 'Roboto' or 'Inter'
+- **Layout**: Responsive design with desktop-first approach but full mobile support
+- **Visual Hierarchy**: Important financial information (balances, totals) emphasized
+
+### Components
+- **Cards**: For accounts, wallet, budgets, goals with consistent styling
+- **Data Tables**: For transactions with sorting and filtering
+- **Charts**: Pie charts for category breakdown, line charts for trends over time
+- **Forms**: Clean, validated forms with real-time feedback
+- **Modals**: For quick actions and confirmations
+- **Notifications**: Toast messages for successful/failed operations
+
+## Authentication & Security Implementation
+
+1. **Login Flow**:
+   - JWT stored in HTTP-only cookies
+   - Refresh token mechanism for session persistence
+   - Protection against CSRF attacks
+
+2. **Protected Routes**:
+   - Higher-order component or hook for route protection
+   - Redirect to login for unauthenticated users
+   - Role-based access control if needed
+
+3. **API Authentication**:
+   - Include credentials in API requests
+   - Handle token expiration and refresh
+   - Secure error handling that doesn't leak sensitive information
+
+## Wallet and Razorpay Integration
+
+### Wallet Dashboard
+- Display current balance prominently
+- Show recent transactions
+- Quick action buttons for transfer and deposit
+
+### Money Transfer Feature
+- User search by email
+- Amount input with validation
+- Transfer confirmation modal
+- Success/failure notifications with details
+
+### Razorpay Integration Steps
+1. **Add Funds Form**:
+   - Amount input with validation
+   - Currency selection (default: INR)
+   - Payment method selection
+
+2. **Integration Flow**:
+   ```javascript
+   // Example Razorpay integration code
+   const initiatePayment = async (amount) => {
+     try {
+       // 1. Call backend to create order
+       const response = await api.post('/api/wallet/deposit', { amount });
+       const { orderId, amount: orderAmount, currency, razorpayKeyId } = response.data;
+       
+       // 2. Initialize Razorpay
+       const options = {
+         key: razorpayKeyId,
+         amount: orderAmount * 100, // in paise
+         currency,
+         name: 'Wealth Guardian',
+         description: 'Add funds to wallet',
+         order_id: orderId,
+         handler: async (response) => {
+           // 3. Verify payment with backend
+           await api.post('/api/wallet/verify-payment', {
+             razorpayOrderId: response.razorpay_order_id,
+             razorpayPaymentId: response.razorpay_payment_id,
+             razorpaySignature: response.razorpay_signature,
+           });
+           
+           // 4. Update UI
+           toast.success('Payment successful! Funds added to wallet.');
+           refreshWalletBalance();
+         },
+         prefill: {
+           name: user.name,
+           email: user.email,
+         },
+         theme: {
+           color: '#1976D2',
+         },
+       };
+       
+       const razorpayInstance = new window.Razorpay(options);
+       razorpayInstance.open();
+     } catch (error) {
+       toast.error('Payment initialization failed: ' + error.message);
+     }
+   };
+   ```
+
+## State Management Strategy
+
+### Global State (Redux)
+- **Auth Slice**: User authentication state, login/logout actions
+- **Accounts Slice**: User's financial accounts data
+- **Transactions Slice**: Recent/filtered transactions
+- **Budgets Slice**: Budget data and progress
+- **Goals Slice**: Financial goals and tracking
+- **Wallet Slice**: Wallet balance and recent transactions
+- **UI Slice**: Theme, sidebar state, notifications
+
+### Server State (React Query)
+- Cache and manage API data
+- Handle loading, error, and success states
+- Optimistic updates for better UX
+- Background refetching to keep data fresh
+
+## API Integration
+
+1. **Base API Setup**:
+   ```javascript
+   // api.js
+   import axios from 'axios';
+
+   const api = axios.create({
+     baseURL: process.env.NEXT_PUBLIC_API_URL,
+     withCredentials: true, // Important for cookies
+     headers: {
+       'Content-Type': 'application/json',
+     },
+   });
+
+   // Request interceptor for authentication
+   api.interceptors.request.use((config) => {
+     // Add any request processing here
+     return config;
+   });
+
+   // Response interceptor for error handling
+   api.interceptors.response.use(
+     (response) => response,
+     (error) => {
+       // Handle token expiration, network errors, etc.
+       if (error.response?.status === 401) {
+         // Redirect to login or refresh token
+       }
+       return Promise.reject(error);
+     }
+   );
+
+   export default api;
+   ```
+
+2. **API Services by Feature**:
+   ```javascript
+   // Example: accountsApi.js
+   import api from '../api';
+
+   export const accountsApi = {
+     getAll: () => api.get('/api/accounts'),
+     getById: (id) => api.get(`/api/accounts/${id}`),
+     create: (data) => api.post('/api/accounts', data),
+     update: (id, data) => api.put(`/api/accounts/${id}`, data),
+     delete: (id) => api.delete(`/api/accounts/${id}`),
+     getSummary: () => api.get('/api/accounts/summary'),
+   };
+   ```
+
+## Form Handling with Validation
+
+Using React Hook Form with Zod schemas that match backend validation:
+
+```javascript
+// Example: WalletTransferForm.jsx
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { z } from 'zod';
+
+// Match backend schema
+const transferSchema = z.object({
+  receiverEmail: z.string().email('Invalid receiver email'),
+  amount: z.number().positive('Amount must be positive'),
+  description: z.string().min(1, 'Description is required').max(100),
+});
+
+const WalletTransferForm = () => {
+  const { 
+    register, 
+    handleSubmit, 
+    formState: { errors } 
+  } = useForm({
+    resolver: zodResolver(transferSchema),
+    defaultValues: {
+      receiverEmail: '',
+      amount: '',
+      description: '',
+    }
+  });
+
+  const onSubmit = async (data) => {
+    try {
+      // Parse amount as number
+      const payload = {
+        ...data,
+        amount: parseFloat(data.amount),
+      };
+      
+      // API call here
+      // ...
+      
+    } catch (error) {
+      // Error handling
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit(onSubmit)}>
+      {/* Form fields here */}
+    </form>
+  );
+};
+```
+
+## Responsive Design Approach
+
+1. **Mobile-First Grid Layout**:
+   - Use CSS Grid and Flexbox for responsive layouts
+   - Breakpoints for different device sizes
+
+2. **Responsive Components**:
+   - Cards that stack on mobile, display in grid on larger screens
+   - Tables that transform to cards on mobile
+   - Navigation that collapses to a hamburger menu
+
+3. **Adaptive UI Elements**:
+   - Font sizes that scale with viewport
+   - Touch-friendly UI elements on mobile
+   - Simplified views for smaller screens
+
+## Data Visualization
+
+Implement charts and graphs for financial data:
+
+1. **Dashboard Overview**:
+   - Spending by category (pie chart)
+   - Income vs expenses (bar chart)
+   - Balance trend (line chart)
+
+2. **Budget Visualization**:
+   - Progress bars for budget categories
+   - Budget vs actual spending (stacked bar chart)
+
+3. **Goals Tracking**:
+   - Progress towards targets (progress bars)
+   - Projection charts for savings goals
+
+## Performance Optimization
+
+1. **Code Splitting**:
+   - Dynamic imports for route-based code splitting
+   - Lazy loading of heavy components
+
+2. **Memoization**:
+   - Use React.memo, useMemo, and useCallback to prevent unnecessary re-renders
+   - Optimize expensive calculations
+
+3. **Asset Optimization**:
+   - Optimize images with next/image
+   - Lazy load images and components below the fold
+
+## Testing Strategy
+
+1. **Unit Tests**:
+   - Test individual components with React Testing Library
+   - Test hooks and utilities
+
+2. **Integration Tests**:
+   - Test component interactions
+   - Test form submissions and validations
+
+3. **E2E Tests**:
+   - Use Cypress to test critical user journeys
+   - Test authentication flow
+   - Test transaction creation and wallet operations
+
+## Deployment Strategy
+
+1. **CI/CD Pipeline**:
+   - GitHub Actions or Vercel for automated deployments
+   - Run tests before deployment
+
+2. **Environment Configuration**:
+   - Use environment variables for API URLs, feature flags
+   - Different configurations for development, staging, production
+
+3. **Monitoring and Analytics**:
+   - Implement error tracking (Sentry)
+   - Add analytics for user behavior
+
+## Getting Started Steps
+
+1. Set up Next.js project:
+   ```bash
+   npx create-next-app wealth-guardian-frontend
+   cd wealth-guardian-frontend
+   ```
+
+2. Install dependencies:
+   ```bash
+   npm install @mui/material @emotion/react @emotion/styled
+   npm install @reduxjs/toolkit react-redux
+   npm install react-query axios
+   npm install react-hook-form @hookform/resolvers zod
+   npm install recharts
+   npm install date-fns
+   ```
+
+3. Set up environment variables:
+   ```
+   NEXT_PUBLIC_API_URL=http://localhost:5000
+   NEXT_PUBLIC_RAZORPAY_KEY_ID=rzp_test_yourkeyid
+   ```
+
+4. Start the development server:
+   ```bash
+   npm run dev
+   ``` 
