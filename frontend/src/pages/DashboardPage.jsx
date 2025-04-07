@@ -255,7 +255,7 @@ const DashboardPage = () => {
       <div className="mb-6">
         <TransactionList transactions={transactions} />
         <div className="mt-4 text-center">
-          <Link to="/wallet/transactions">
+          <Link to="/transactions">
             <Button variant="outline">View All Transactions</Button>
           </Link>
         </div>
