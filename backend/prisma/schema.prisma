@@ -121,6 +121,7 @@ model WalletTransaction {
 model RazorpayPayment {
   id                String            @id
   orderId           String            @unique
+  razorpayPaymentId String?           // Add this field to store the payment ID
   amount            Float
   currency          String            @default("INR")
   status            PaymentStatus     @default(CREATED)

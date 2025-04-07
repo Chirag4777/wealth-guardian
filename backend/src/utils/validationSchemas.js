@@ -110,11 +110,26 @@ const createPaymentOrderSchema = z.object({
   currency: z.string().min(3).max(3).default('INR')
 });
 
+// Verify payment schema that supports both naming conventions
 const verifyPaymentSchema = z.object({
-  razorpayOrderId: z.string().min(1, 'Order ID is required'),
-  razorpayPaymentId: z.string().min(1, 'Payment ID is required'),
-  razorpaySignature: z.string().min(1, 'Payment signature is required')
-});
+  // Support both camelCase and snake_case formats
+  razorpayOrderId: z.string().min(1, 'Order ID is required').optional(),
+  razorpay_order_id: z.string().min(1, 'Order ID is required').optional(),
+  
+  razorpayPaymentId: z.string().min(1, 'Payment ID is required').optional(),
+  razorpay_payment_id: z.string().min(1, 'Payment ID is required').optional(),
+  
+  razorpaySignature: z.string().min(1, 'Payment signature is required').optional(),
+  razorpay_signature: z.string().min(1, 'Payment signature is required').optional()
+}).refine(
+  data => (data.razorpayOrderId || data.razorpay_order_id) &&
+          (data.razorpayPaymentId || data.razorpay_payment_id) &&
+          (data.razorpaySignature || data.razorpay_signature),
+  {
+    message: 'Missing required payment verification parameters',
+    path: ['payment_verification']
+  }
+);
 
 const transferMoneySchema = z.object({
   receiverEmail: z.string().email('Invalid receiver email'),

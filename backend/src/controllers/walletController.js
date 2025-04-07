@@ -1,6 +1,8 @@
 const asyncHandler = require('express-async-handler');
 const prisma = require('../utils/prisma');
-const { createOrder, verifyPaymentSignature } = require('../utils/razorpayUtils');
+const razorpayUtils = require('../utils/razorpayUtils');
+const { createPaymentOrderSchema, verifyPaymentSchema } = require('../utils/validationSchemas');
+const config = require('../config/config');
 
 /**
  * Get wallet details for the logged-in user
@@ -198,8 +200,10 @@ const createPaymentOrder = asyncHandler(async (req, res) => {
     const timestamp = Date.now().toString().substring(0, 10);
     const receipt = `wg_${shortId}_${timestamp}`;
 
-    // Create Razorpay order
-    const order = await createOrder(amount, receipt, currency);
+    // Create Razorpay order - pass amount first, then currency, then receipt
+    const order = await razorpayUtils.createOrder(amount, currency, receipt);
+
+    console.log('Order created with ID:', order.id, 'Amount:', order.amount);
 
     // Store payment info in database
     await prisma.razorpayPayment.create({
@@ -208,17 +212,25 @@ const createPaymentOrder = asyncHandler(async (req, res) => {
         orderId: order.id,
         amount,
         currency,
-        walletId: wallet.id,
+        wallet: {
+          connect: {
+            id: wallet.id
+          }
+        },
         status: 'CREATED',
       },
     });
 
+    // Get key ID from config
+    const keyId = config.razorpay.keyId;
+
     res.status(201).json({
       success: true,
       id: order.id,
-      amount: amount, // Original amount in rupees
+      amount: order.amount, // This is already in paise
       currency: order.currency,
-      key: process.env.RAZORPAY_KEY_ID || 'rzp_test_UdVjVwRqNtjmU7'
+      key: keyId,
+      order_id: order.id // Include explicitly for Razorpay
     });
   } catch (error) {
     console.error('Error creating payment order:', error);
@@ -231,133 +243,158 @@ const createPaymentOrder = asyncHandler(async (req, res) => {
 });
 
 /**
- * Verify Razorpay payment and add funds to wallet
+ * Verify Razorpay Payment
  * @route POST /api/wallet/verify-payment
- * @access Private
  */
 const verifyPayment = asyncHandler(async (req, res) => {
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
-  
-  console.log('Payment verification request:', { 
-    orderId: razorpay_order_id, 
-    paymentId: razorpay_payment_id,
-    hasSignature: !!razorpay_signature
-  });
-
-  if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
-    return res.status(400).json({
-      success: false,
-      message: 'Missing payment verification parameters'
-    });
-  }
-
   try {
+    console.log('=================== PAYMENT VERIFICATION START ===================');
+    console.log('Received payment verification request:', JSON.stringify({
+      ...req.body,
+      razorpaySignature: req.body.razorpaySignature ? '***signature-present***' : undefined,
+      razorpay_signature: req.body.razorpay_signature ? '***signature-present***' : undefined
+    }));
+
+    // Validate request body
+    const validationResult = verifyPaymentSchema.safeParse(req.body);
+    if (!validationResult.success) {
+      console.error('Payment verification validation failed:', validationResult.error);
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: validationResult.error.errors.map(err => ({
+          field: err.path.join('.'),
+          message: err.message
+        }))
+      });
+    }
+
+    console.log('Validation passed, extracting parameters');
+    
+    // Extract parameters - support both camelCase and snake_case formats
+    const orderId = req.body.razorpayOrderId || req.body.razorpay_order_id;
+    const paymentId = req.body.razorpayPaymentId || req.body.razorpay_payment_id;
+    const signature = req.body.razorpaySignature || req.body.razorpay_signature;
+
+    console.log(`Verifying payment with orderId: ${orderId.substring(0, 10)}... paymentId: ${paymentId.substring(0, 10)}...`);
+
     // Verify payment signature
-    const isValidSignature = verifyPaymentSignature(
-      razorpay_order_id,
-      razorpay_payment_id,
-      razorpay_signature
+    console.log('Calling razorpayUtils.verifyPaymentSignature');
+    const isValidSignature = razorpayUtils.verifyPaymentSignature(
+      orderId,
+      paymentId,
+      signature
     );
 
     if (!isValidSignature) {
-      console.error('Invalid signature for payment:', { 
-        orderId: razorpay_order_id, 
-        paymentId: razorpay_payment_id 
-      });
-      
+      console.error('Invalid payment signature');
       return res.status(400).json({
         success: false,
-        message: 'Invalid payment signature. Payment verification failed.'
+        message: 'Invalid payment signature'
       });
     }
 
-    // Find the payment record
-    const payment = await prisma.razorpayPayment.findUnique({
+    console.log('Signature verification successful, looking up wallet');
+    
+    // Get wallet for the user
+    const wallet = await prisma.wallet.findUnique({
       where: {
-        orderId: razorpay_order_id,
-      },
-      include: {
-        wallet: true,
+        userId: req.user.id,
       },
     });
-
-    if (!payment) {
-      console.error('Payment order not found:', razorpay_order_id);
-      
+    
+    if (!wallet) {
+      console.error(`No wallet found for user ID: ${req.user.id}`);
       return res.status(404).json({
         success: false,
-        message: 'Payment order not found'
+        message: 'Wallet not found'
       });
     }
 
-    // Verify wallet belongs to current user
-    if (payment.wallet.userId !== req.user.id) {
-      console.error('Unauthorized verification attempt. User:', req.user.id, 'Wallet owner:', payment.wallet.userId);
-      
-      return res.status(403).json({
-        success: false,
-        message: 'Not authorized to verify this payment'
+    console.log(`Found wallet with ID: ${wallet.id}, balance: ${wallet.balance}`);
+    
+    // Check if transaction already processed to prevent duplicate processing
+    console.log('Checking for existing transaction');
+    const existingTransaction = await prisma.walletTransaction.findFirst({
+      where: {
+        razorpayPaymentId: paymentId,
+      }
+    });
+
+    if (existingTransaction) {
+      console.log(`Transaction already processed: ${existingTransaction.id}`);
+      return res.status(200).json({
+        success: true,
+        message: 'Payment already verified',
+        transaction: existingTransaction
       });
     }
 
-    // If payment is already processed, return success
-    if (payment.status === 'CAPTURED') {
-      console.log('Payment already processed:', razorpay_payment_id);
-      
-      // Find the related transaction to return consistent response
-      const transaction = await prisma.walletTransaction.findFirst({
+    console.log('No existing transaction found, looking up payment record');
+    
+    // Find the payment record by orderId (which is unique)
+    try {
+      const payment = await prisma.razorpayPayment.findUnique({
         where: {
-          razorpayPaymentId: razorpay_payment_id
+          orderId: orderId
+        },
+        include: {
+          wallet: true
         }
       });
+
+      console.log('Payment lookup result:', payment ? 
+        `ID: ${payment.id}, Amount: ${payment.amount}, Status: ${payment.status}` : 
+        'No payment found');
+
+      if (!payment) {
+        console.error(`No payment record found for orderId: ${orderId}`);
+        return res.status(404).json({
+          success: false,
+          message: 'Payment record not found'
+        });
+      }
+
+      // Verify that the payment belongs to this user's wallet
+      console.log(`Payment wallet userId: ${payment.wallet.userId}, Current user: ${req.user.id}`);
+      if (payment.wallet.userId !== req.user.id) {
+        console.error(`Payment belongs to a different user. Expected: ${req.user.id}, Found: ${payment.wallet.userId}`);
+        return res.status(403).json({
+          success: false,
+          message: 'Not authorized to verify this payment'
+        });
+      }
+
+      console.log('Creating transaction record');
       
-      return res.json({ 
-        success: true, 
-        message: 'Payment already processed',
-        transaction: transaction ? {
-          id: transaction.id,
-          amount: transaction.amount,
-          status: 'completed',
-          createdAt: transaction.createdAt
-        } : {
-          id: payment.id,
-          amount: payment.amount,
-          status: 'completed'
-        }
-      });
-    }
-
-    console.log('Processing new payment:', razorpay_payment_id);
-
-    // Process the payment in a transaction to ensure atomicity
-    const result = await prisma.$transaction(async (prisma) => {
-      // Update payment status
-      const updatedPayment = await prisma.razorpayPayment.update({
+      // First update the payment record with new status
+      await prisma.razorpayPayment.update({
         where: {
           id: payment.id,
         },
         data: {
-          id: razorpay_payment_id, // Update with actual payment ID
-          status: 'CAPTURED',
+          razorpayPaymentId: paymentId,
+          status: 'CAPTURED'
         },
       });
-
-      // Create wallet transaction
-      const walletTransaction = await prisma.walletTransaction.create({
+      
+      // Create transaction
+      const transaction = await prisma.walletTransaction.create({
         data: {
           amount: payment.amount,
           type: 'DEPOSIT',
           description: 'Funds added via Razorpay',
           status: 'COMPLETED',
-          walletId: payment.walletId,
-          razorpayPaymentId: razorpay_payment_id,
+          walletId: wallet.id,
+          razorpayPaymentId: payment.id
         },
       });
 
+      console.log(`Transaction created with ID: ${transaction.id}`);
+      
       // Update wallet balance
       const updatedWallet = await prisma.wallet.update({
         where: {
-          id: payment.walletId,
+          id: wallet.id,
         },
         data: {
           balance: {
@@ -366,53 +403,28 @@ const verifyPayment = asyncHandler(async (req, res) => {
         },
       });
 
-      // Update razorpay payment with the wallet transaction ID
-      await prisma.razorpayPayment.update({
-        where: {
-          id: razorpay_payment_id,
-        },
-        data: {
-          walletTransaction: {
-            connect: {
-              id: walletTransaction.id,
-            },
-          },
-        },
+      console.log(`Wallet balance updated. New balance: ${updatedWallet.balance}`);
+      console.log('=================== PAYMENT VERIFICATION SUCCESS ===================');
+
+      return res.status(200).json({
+        success: true,
+        message: 'Payment verified successfully',
+        transaction: transaction
       });
-
-      return {
-        payment: updatedPayment,
-        wallet: updatedWallet,
-        transaction: walletTransaction,
-      };
-    });
-
-    console.log('Payment successfully processed:', razorpay_payment_id);
-
-    res.status(200).json({
-      success: true,
-      message: 'Payment verified and funds added to wallet',
-      transaction: {
-        id: result.transaction.id,
-        amount: result.transaction.amount,
-        status: 'completed',
-        createdAt: result.transaction.createdAt
-      },
-      wallet: {
-        id: result.wallet.id,
-        balance: result.wallet.balance,
-      },
-    });
+    } catch (dbError) {
+      console.error('Database error during payment verification:', dbError);
+      return res.status(500).json({
+        success: false,
+        message: `Database error: ${dbError.message}`
+      });
+    }
   } catch (error) {
-    console.error('Payment verification error:', error, { 
-      orderID: razorpay_order_id,
-      paymentID: razorpay_payment_id 
-    });
-    
-    res.status(500).json({
+    console.error('=================== PAYMENT VERIFICATION ERROR ===================');
+    console.error('Error verifying payment:', error);
+    console.error('Error stack:', error.stack);
+    return res.status(500).json({
       success: false,
-      message: 'Payment verification failed. Please contact support.',
-      error: error.message
+      message: 'Internal server error while verifying payment'
     });
   }
 });

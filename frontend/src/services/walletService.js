@@ -4,20 +4,17 @@ import api from './api';
 const RAZORPAY_KEY_ID = import.meta.env.VITE_RAZORPAY_KEY_ID || 'rzp_test_UdVjVwRqNtjmU7';
 
 const walletService = {
-  // Get wallet balance and info
-  getWalletInfo: async () => {
+  /**
+   * Get wallet balance
+   * @returns {Promise<Object>} Wallet information including balance
+   */
+  async getWalletInfo() {
     try {
       const response = await api.get('/wallet');
       return response.data;
     } catch (error) {
       console.error('Error fetching wallet info:', error);
-      // Return fallback data if the API call fails
-      return {
-        balance: 0,
-        walletId: 'N/A',
-        createdAt: new Date().toISOString(),
-        status: 'active'
-      };
+      throw error;
     }
   },
 
@@ -38,55 +35,78 @@ const walletService = {
     return response.data;
   },
 
-  // Create a new Razorpay order
-  createRazorpayOrder: async (amount) => {
+  /**
+   * Create a Razorpay order
+   * @param {number} amount - Amount in rupees (INR)
+   * @returns {Promise<Object>} Order details from Razorpay
+   */
+  async createRazorpayOrder(amount) {
+    // Validate amount
+    const numericAmount = Number(amount);
+    if (isNaN(numericAmount) || numericAmount <= 0) {
+      throw new Error('Invalid amount. Please enter a positive number.');
+    }
+
+    // Backend will convert this to paise, so we send in rupees
     try {
-      const response = await api.post('/wallet/deposit', { amount });
+      console.log(`Creating Razorpay order for amount: ${numericAmount} INR`);
+      const response = await api.post('/wallet/deposit', { 
+        amount: numericAmount,
+        currency: 'INR'
+      });
+      console.log('Order created successfully:', response.data);
       return response.data;
     } catch (error) {
       console.error('Error creating Razorpay order:', error);
-      
       if (error.response && error.response.data) {
-        if (error.response.data.message) {
-          throw new Error(error.response.data.message);
-        } else if (error.response.data.error) {
-          throw new Error(error.response.data.error);
-        }
+        console.error('Error details:', error.response.data);
+        throw new Error(error.response.data.message || 'Failed to create payment order');
       }
-      
-      throw new Error('Failed to create payment order. Please try again.');
+      throw error;
     }
   },
 
-  // Verify and process Razorpay payment
-  verifyRazorpayPayment: async (paymentData) => {
+  /**
+   * Verify Razorpay payment signature
+   * @param {Object} paymentData - Object containing Razorpay payment data
+   * @returns {Promise<Object>} Verification result
+   */
+  async verifyRazorpayPayment(paymentData) {
     try {
-      console.log('Verifying payment with backend:', {
-        orderId: paymentData.razorpay_order_id,
-        paymentId: paymentData.razorpay_payment_id,
-        hasSignature: !!paymentData.razorpay_signature
-      });
+      console.log('Verifying payment with data:', paymentData);
       
-      const response = await api.post('/wallet/verify-payment', paymentData);
-      console.log('Payment verification response:', response.data);
-      
-      return response.data;
-    } catch (error) {
-      console.error('Error verifying Razorpay payment:', error);
-      
-      if (error.response) {
-        console.error('Server responded with error:', error.response.status, error.response.data);
-        
-        if (error.response.data) {
-          if (error.response.data.message) {
-            throw new Error(error.response.data.message);
-          } else if (error.response.data.error) {
-            throw new Error(error.response.data.error);
-          }
-        }
+      // Basic validation before sending
+      if (!paymentData.razorpay_order_id || !paymentData.razorpay_payment_id || !paymentData.razorpay_signature) {
+        throw new Error('Missing required Razorpay parameters');
       }
       
-      throw new Error('Payment verification failed. Please try again or contact support.');
+      // Don't transform the parameter names, pass them as received
+      // This ensures compatibility with both camelCase and snake_case formats
+      const response = await api.post('/wallet/verify-payment', paymentData);
+      
+      console.log('Verification response:', response.data);
+      return response.data;
+    } catch (error) {
+      console.error('Payment verification error:', error);
+      if (error.response) {
+        console.error('Error status:', error.response.status);
+        console.error('Error details:', error.response.data);
+        
+        // Format validation errors for better display
+        if (error.response.status === 400 && error.response.data.errors) {
+          const errorMessages = error.response.data.errors.map(err => err.message).join('; ');
+          throw new Error(`Validation error: ${errorMessages}`);
+        }
+        
+        // Handle 500 error with more context
+        if (error.response.status === 500) {
+          console.error('Server error detected in payment verification. Check server logs.');
+          throw new Error(error.response.data.message || 'Server error during payment verification');
+        }
+        
+        throw new Error(error.response.data.message || 'Payment verification failed');
+      }
+      throw error;
     }
   },
 
@@ -124,20 +144,18 @@ const walletService = {
     }
   },
 
-  // Get all transactions for the current user
-  getTransactions: async (filter = {}, page = 1, limit = 10) => {
+  /**
+   * Get wallet transaction history
+   * @param {Object} options - Pagination and filtering options
+   * @returns {Promise<Object>} Transaction list with pagination info
+   */
+  async getTransactions(options = {}) {
     try {
-      const response = await api.get('/wallet/transactions', { 
-        params: { ...filter, page, limit } 
-      });
+      const response = await api.get('/wallet/transactions', { params: options });
       return response.data;
     } catch (error) {
       console.error('Error fetching transactions:', error);
-      // Return fallback data if the API call fails
-      return {
-        transactions: [],
-        totalCount: 0
-      };
+      throw error;
     }
   },
 

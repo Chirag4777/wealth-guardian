@@ -1,99 +1,140 @@
-const Razorpay = require('razorpay');
 const crypto = require('crypto');
+const Razorpay = require('razorpay');
+const config = require('../config/config');
 
-/**
- * Initialize Razorpay instance with credentials
- */
+// Initialize Razorpay with API credentials
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || 'rzp_test_UdVjVwRqNtjmU7',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'mP14sROQFJnTxgDdW4UKlQ1B',
+  key_id: config.razorpay.keyId,
+  key_secret: config.razorpay.keySecret,
 });
 
 /**
- * Create a new payment order
- * @param {Number} amount - Amount in smallest currency unit (paise for INR)
- * @param {String} currency - Currency code (default: INR)
- * @param {String} receipt - Receipt identifier
- * @returns {Object} Razorpay order
+ * Create a new Razorpay order
+ * @param {number} amount - Amount in rupees
+ * @param {string} currency - Currency code (default: INR)
+ * @param {string} receipt - Receipt ID (optional)
+ * @returns {Promise<Object>} Razorpay order object
  */
-const createOrder = async (amount, receipt, currency = 'INR') => {
+const createOrder = async (amount, currency = 'INR', receipt = '') => {
   try {
+    // Validate amount
+    if (!amount || isNaN(amount) || amount <= 0) {
+      throw new Error('Invalid amount. Must be a positive number.');
+    }
+
+    // Convert amount to paise (Razorpay requires amount in lowest denomination)
+    const amountInPaise = Math.round(amount * 100);
+
+    // Create order options
     const options = {
-      amount: Math.round(amount * 100), // amount in paise
+      amount: amountInPaise,
       currency,
-      receipt,
-      payment_capture: 1, // Auto capture payment
+      receipt: receipt || `receipt_${Date.now()}`,
+      payment_capture: 1, // Auto-capture payment
     };
 
-    return await razorpay.orders.create(options);
-  } catch (error) {
-    console.error('Razorpay order creation error:', error);
-    throw new Error(`Failed to create payment order: ${error.message}`);
-  }
-};
+    console.log('Creating Razorpay order with options:', {
+      ...options,
+      key_id: config.razorpay.keyId.substring(0, 8) + '...',
+    });
 
-/**
- * Verify Razorpay webhook signature
- * @param {String} body - Request body as string
- * @param {String} signature - Request signature header
- * @param {String} secret - Webhook secret
- * @returns {Boolean} Whether signature is valid
- */
-const verifyWebhookSignature = (body, signature, secret) => {
-  try {
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(body)
-      .digest('hex');
-      
-    return crypto.timingSafeEqual(
-      Buffer.from(expectedSignature, 'hex'),
-      Buffer.from(signature, 'hex')
-    );
+    // Create order
+    const order = await razorpay.orders.create(options);
+    
+    console.log('Razorpay order created:', {
+      id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      receipt: order.receipt,
+    });
+
+    return order;
   } catch (error) {
-    console.error('Webhook signature verification error:', error);
-    return false;
+    console.error('Error creating Razorpay order:', error);
+    throw new Error(`Failed to create Razorpay order: ${error.message}`);
   }
 };
 
 /**
  * Verify Razorpay payment signature
- * @param {String} orderId - Razorpay order ID
- * @param {String} paymentId - Razorpay payment ID
- * @param {String} signature - Payment signature
- * @returns {Boolean} Whether signature is valid
+ * @param {string} orderId - Razorpay order ID
+ * @param {string} paymentId - Razorpay payment ID
+ * @param {string} signature - Razorpay signature
+ * @returns {boolean} Whether the signature is valid
  */
 const verifyPaymentSignature = (orderId, paymentId, signature) => {
   try {
+    // Log parameters (with truncation for security)
+    console.log('Verifying signature with params:', {
+      orderId: orderId ? orderId.substring(0, 8) + '...' : 'undefined',
+      paymentId: paymentId ? paymentId.substring(0, 8) + '...' : 'undefined',
+      signatureProvided: !!signature
+    });
+
+    // Validate input parameters
     if (!orderId || !paymentId || !signature) {
-      console.error('Missing parameters for signature verification:', {
-        hasOrderId: !!orderId,
-        hasPaymentId: !!paymentId,
-        hasSignature: !!signature
-      });
+      console.error('Missing required parameters for signature verification');
       return false;
     }
 
-    const secret = process.env.RAZORPAY_KEY_SECRET || 'mP14sROQFJnTxgDdW4UKlQ1B';
+    // Generate signature verification string (order_id|payment_id)
     const payload = orderId + '|' + paymentId;
     
-    const generatedSignature = crypto
-      .createHmac('sha256', secret)
+    // Generate HMAC using SHA256 algorithm and secret key
+    const expectedSignature = crypto
+      .createHmac('sha256', config.razorpay.keySecret)
       .update(payload)
       .digest('hex');
     
-    console.log('Signature verification:', {
-      provided: signature.substring(0, 10) + '...',
-      generated: generatedSignature.substring(0, 10) + '...',
-      match: generatedSignature === signature
-    });
-
-    return generatedSignature === signature;
+    // Compare generated signature with provided signature
+    const isValid = expectedSignature === signature;
+    
+    if (!isValid) {
+      console.warn('Signature verification failed - signatures do not match');
+    } else {
+      console.log('Payment signature verification successful');
+    }
+    
+    return isValid;
   } catch (error) {
-    console.error('Payment signature verification error:', error, {
-      orderId,
-      paymentId
-    });
+    console.error('Error verifying payment signature:', error);
+    return false;
+  }
+};
+
+/**
+ * Verify Razorpay webhook signature
+ * @param {string} payload - Request body as string
+ * @param {string} signature - Webhook signature from headers
+ * @returns {boolean} Whether the signature is valid
+ */
+const verifyWebhookSignature = (payload, signature) => {
+  try {
+    console.log('Verifying webhook signature');
+    
+    if (!payload || !signature) {
+      console.error('Missing payload or signature for webhook verification');
+      return false;
+    }
+
+    // Generate expected signature using HMAC SHA256
+    const expectedSignature = crypto
+      .createHmac('sha256', config.razorpay.webhookSecret)
+      .update(payload)
+      .digest('hex');
+
+    // Verify signature
+    const isValid = expectedSignature === signature;
+    
+    if (!isValid) {
+      console.warn('Webhook signature verification failed');
+    } else {
+      console.log('Webhook signature verification successful');
+    }
+    
+    return isValid;
+  } catch (error) {
+    console.error('Error verifying webhook signature:', error);
     return false;
   }
 };
@@ -101,6 +142,6 @@ const verifyPaymentSignature = (orderId, paymentId, signature) => {
 module.exports = {
   razorpay,
   createOrder,
-  verifyWebhookSignature,
   verifyPaymentSignature,
+  verifyWebhookSignature,
 }; 

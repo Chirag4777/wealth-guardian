@@ -46,7 +46,16 @@ const AddFundsForm = ({ onFundsAdded }) => {
   }, []);
   
   const handleAmountChange = (e) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
+    const value = e.target.value.replace(/[^0-9.]/g, '');
+    // Ensure only one decimal point
+    const parts = value.split('.');
+    if (parts.length > 2) {
+      return;
+    }
+    // Ensure only two decimal places
+    if (parts[1] && parts[1].length > 2) {
+      return;
+    }
     setAmount(value);
     if (error) {
       setError('');
@@ -90,9 +99,14 @@ const AddFundsForm = ({ onFundsAdded }) => {
     setError('');
     
     try {
-      // 1. Create order on server
-      console.log('Creating payment order for amount:', amount);
-      const orderData = await walletService.createRazorpayOrder(parseFloat(amount));
+      // Parse amount as number for backend validation
+      // Force to 2 decimal places and ensure it's a number
+      const numericAmount = Number(parseFloat(amount).toFixed(2));
+      
+      console.log('Creating payment order with amount:', numericAmount);
+      
+      // Send the amount in rupees to backend
+      const orderData = await walletService.createRazorpayOrder(numericAmount);
       console.log('Payment order created:', orderData);
 
       if (!orderData.success) {
@@ -100,9 +114,10 @@ const AddFundsForm = ({ onFundsAdded }) => {
       }
       
       // 2. Initialize Razorpay
+      // Note: Backend now returns the amount already in paise
       const options = {
         key: orderData.key,
-        amount: parseFloat(amount) * 100, // Convert to paise
+        amount: orderData.amount, // This is already in paise from the backend
         currency: orderData.currency || 'INR',
         name: 'Wealth Guardian',
         description: 'Add funds to wallet',
@@ -111,7 +126,7 @@ const AddFundsForm = ({ onFundsAdded }) => {
           console.log('Razorpay success response:', response);
           
           // Call verification in a separate function to avoid Razorpay callback issues
-          verifyPayment(response);
+          verifyPayment(response, numericAmount);
         },
         prefill: {
           name: userData.name || 'User',
@@ -131,7 +146,8 @@ const AddFundsForm = ({ onFundsAdded }) => {
       
       console.log('Initializing Razorpay with options:', {
         ...options,
-        key: options.key ? options.key.substring(0, 8) + '...' : 'undefined'
+        key: options.key ? options.key.substring(0, 8) + '...' : 'undefined',
+        amount: options.amount
       });
       
       const razorpayInstance = new window.Razorpay(options);
@@ -150,23 +166,32 @@ const AddFundsForm = ({ onFundsAdded }) => {
   };
   
   // Separate function to handle payment verification to avoid Razorpay callback issues
-  const verifyPayment = async (response) => {
+  const verifyPayment = async (response, originalAmount) => {
     try {
-      // 3. Verify payment with backend
-      console.log('Verifying payment with params:', response);
-      const result = await walletService.verifyRazorpayPayment({
+      // Ensure we have all required verification parameters
+      if (!response.razorpay_order_id || !response.razorpay_payment_id || !response.razorpay_signature) {
+        throw new Error('Missing Razorpay parameters in response');
+      }
+      
+      // Match exact parameter names as required by backend validation schema
+      // Use snake_case to match Razorpay's default format
+      const verificationData = {
         razorpay_order_id: response.razorpay_order_id,
         razorpay_payment_id: response.razorpay_payment_id,
         razorpay_signature: response.razorpay_signature
-        // No amount parameter needed
-      });
+      };
+      
+      console.log('Verifying payment with params:', verificationData);
+      
+      // 3. Verify payment with backend
+      const result = await walletService.verifyRazorpayPayment(verificationData);
       
       console.log('Payment verification result:', result);
       
       // 4. Update UI
       if (result.success && onFundsAdded) {
         onFundsAdded({
-          amount: parseFloat(amount),
+          amount: originalAmount, // Use the original amount in rupees, not paise
           paymentId: response.razorpay_payment_id,
           orderId: response.razorpay_order_id,
           transaction: result.transaction || {}
