@@ -15,9 +15,9 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
-// Configure CORS properly
+// Configure CORS to allow all origins
 const corsOptions = {
-  origin: process.env.FRONTEND_URL || "http://localhost:5173", // Vite uses 5173 by default
+  origin: true, // Allow all origins
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
